@@ -45,7 +45,7 @@ export function useAreaAutomationSocket(sessionIds: string[]) {
 
     const socket = io(`${getSocketUrl()}/automation-monitor`, {
       path: "/ws",
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       extraHeaders: {
         "ngrok-skip-browser-warning": "true",
       },

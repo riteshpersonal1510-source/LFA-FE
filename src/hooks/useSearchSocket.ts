@@ -97,7 +97,7 @@ export function useSearchSocket(
     const url = getSocketUrl();
     const socket: Socket = io(`${url}/automation-monitor`, {
       path: "/ws",
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       extraHeaders: {
         "ngrok-skip-browser-warning": "true",
       },
