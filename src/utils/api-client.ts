@@ -12,7 +12,7 @@ export function getApiBaseUrl(): string {
   }
 
   if (typeof window !== 'undefined') {
-    return '/api/v1';
+    return `${window.location.origin}/api/v1`.replace(/\/$/, '');
   }
 
   return '/api/v1';
@@ -23,7 +23,7 @@ export function setApiBaseUrl(url: string): void {
 }
 
 export async function discoverApiUrl(): Promise<string | null> {
-  const bootstrapUrl = '/api/v1';
+  const bootstrapUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1`.replace(/\/$/, '');
 
   const candidates = [
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, ''),
