@@ -106,11 +106,17 @@ class APIClient {
     );
   }
 
+  private normalizeUrl(url?: string): string | undefined {
+    if (!url) return url;
+    return url.replace(/^\/+/, '');
+  }
+
   private async request<T>(config: AxiosRequestConfig): Promise<T> {
     const base = getApiBaseUrl();
     const finalConfig = {
       ...config,
       baseURL: base,
+      url: this.normalizeUrl(config.url?.toString()),
       timeout: config.timeout || 30000,
     };
 
@@ -124,7 +130,7 @@ class APIClient {
   }
 
   public async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return this.request<T>({ ...config, method: 'GET', url });
+    return this.request<T>({ ...config, method: 'GET', url: this.normalizeUrl(url) });
   }
 
   public async post<T = any>(
@@ -132,7 +138,7 @@ class APIClient {
     data?: any,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    return this.request<T>({ ...config, method: 'POST', url, data });
+    return this.request<T>({ ...config, method: 'POST', url: this.normalizeUrl(url), data });
   }
 
   public async put<T = any>(
@@ -140,7 +146,7 @@ class APIClient {
     data?: any,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    return this.request<T>({ ...config, method: 'PUT', url, data });
+    return this.request<T>({ ...config, method: 'PUT', url: this.normalizeUrl(url), data });
   }
 
   public async patch<T = any>(
@@ -148,16 +154,16 @@ class APIClient {
     data?: any,
     config?: AxiosRequestConfig
   ): Promise<T> {
-    return this.request<T>({ ...config, method: 'PATCH', url, data });
+    return this.request<T>({ ...config, method: 'PATCH', url: this.normalizeUrl(url), data });
   }
 
   public async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return this.request<T>({ ...config, method: 'DELETE', url });
+    return this.request<T>({ ...config, method: 'DELETE', url: this.normalizeUrl(url) });
   }
 
   public async getBlob(url: string, config?: AxiosRequestConfig): Promise<Blob> {
     const base = getApiBaseUrl();
-    const response = await this.client.get(url, {
+    const response = await this.client.get(this.normalizeUrl(url), {
       ...config,
       baseURL: base,
       responseType: 'blob',
