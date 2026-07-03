@@ -84,9 +84,6 @@ export function Header() {
     await authService.logout();
     clearAuth();
     clearAuthFromStorage();
-    localStorage.removeItem("authToken");
-    document.cookie = "accessToken=; path=/; max-age=0";
-    document.cookie = "auth_token=; path=/; max-age=0";
     router.push("/login");
   };
 

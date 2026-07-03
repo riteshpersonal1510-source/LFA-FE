@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { parseApiError } from './api';
+import { getCookie, clearAuthFromStorage } from './auth-persistence';
 
 let runtimeBaseUrl: string | null = null;
 
@@ -79,7 +80,7 @@ class APIClient {
     this.client.interceptors.request.use(
       (config) => {
         if (typeof window !== 'undefined') {
-          const token = localStorage.getItem('authToken');
+          const token = getCookie('authToken');
           if (token && config.headers) {
             config.headers.Authorization = `Bearer ${token}`;
           }
@@ -96,9 +97,13 @@ class APIClient {
     this.client.interceptors.response.use(
       (response: AxiosResponse) => response,
       (error) => {
-        if (error.response?.status === 401) {
+        if (error.response?.status === 401 || error.response?.status === 403) {
           if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-            localStorage.removeItem('authToken');
+            clearAuthFromStorage();
+            
+            // Clear zustand store implicitly or let layout handle it.
+            // Using a direct reload/redirect is safest to clear React state completely.
+            window.location.href = '/login?expired=1';
           }
         }
         return Promise.reject(error);
@@ -163,7 +168,7 @@ class APIClient {
 
   public async getBlob(url: string, config?: AxiosRequestConfig): Promise<Blob> {
     const base = getApiBaseUrl();
-    const response = await this.client.get(this.normalizeUrl(url), {
+    const response = await this.client.get(this.normalizeUrl(url) || '', {
       ...config,
       baseURL: base,
       responseType: 'blob',

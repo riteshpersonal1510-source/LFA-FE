@@ -156,69 +156,105 @@ export function SearchHistory({ sessionId: activeSessionId }: { sessionId?: stri
     fetchHistory(1);
   }, [statusFilter, fetchHistory]);
 
-  useSearchSocket(activeSessionId ?? null, {
-    onCompleted() {
-      setTimeout(() => fetchHistory(1), 500);
-    },
-    onError() {
-      setTimeout(() => fetchHistory(1), 500);
-    },
-    onStopped() {
-      setTimeout(() => fetchHistory(1), 500);
-    },
-    onTimeout() {
-      setTimeout(() => fetchHistory(1), 500);
-    },
-    onHistoryUpdate() {
-      setTimeout(() => fetchHistory(1), 500);
-    },
-  });
+  // We no longer trigger full refetches via useSearchSocket to avoid stuttering/race conditions.
+  useSearchSocket(activeSessionId ?? null, {});
 
   useEffect(() => {
     const socket: Socket = io(`${getSocketUrl()}/automation-monitor`, {
       path: "/ws",
       transports: ["websocket", "polling"],
-      extraHeaders: {
-        "ngrok-skip-browser-warning": "true",
-      },
+      extraHeaders: { "ngrok-skip-browser-warning": "true" },
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
     });
 
-    socket.on("search:history-update", () => {
-      setTimeout(() => fetchHistory(1), 300);
+    socket.on("search:start", (msg: any) => {
+      if (!msg?.sessionId) return;
+      setData((prev) => {
+        if (!prev) return prev;
+        const exists = prev.items.some((i) => i.searchSessionId === msg.sessionId);
+        if (exists) return prev;
+
+        const newItem: SearchHistoryItem = {
+          _id: msg.sessionId,
+          searchSessionId: msg.sessionId,
+          keyword: msg.data?.keyword || "Unknown",
+          sources: msg.data?.sources || [],
+          totalLeads: 0,
+          businessesFound: 0,
+          businessesSaved: 0,
+          duplicates: 0,
+          status: "RUNNING",
+          startedAt: msg.timestamp || new Date().toISOString(),
+          duration: 0,
+          state: msg.data?.state,
+          city: msg.data?.city,
+          area: msg.data?.area,
+        };
+        return { ...prev, items: [newItem, ...prev.items] };
+      });
     });
-    
-    socket.on("search:completed", () => {
-      setTimeout(() => fetchHistory(1), 300);
+
+    socket.on("search:progress", (msg: any) => {
+      const data = msg?.data || msg;
+      const sId = data?.searchSessionId || msg?.sessionId;
+      if (!sId) return;
+
+      setData((prev) => {
+        if (!prev) return prev;
+        const idx = prev.items.findIndex((i) => i.searchSessionId === sId);
+        if (idx === -1) return prev;
+
+        const newItems = [...prev.items];
+        newItems[idx] = {
+          ...newItems[idx],
+          status: "RUNNING",
+          businessesFound: data.foundCount ?? newItems[idx].businessesFound,
+          businessesSaved: data.savedCount ?? newItems[idx].businessesSaved,
+          duplicates: data.duplicateCount ?? newItems[idx].duplicates,
+          totalLeads: data.foundCount ?? newItems[idx].totalLeads,
+        };
+        return { ...prev, items: newItems };
+      });
     });
-    
-    socket.on("search:error", () => {
-      setTimeout(() => fetchHistory(1), 300);
+
+    const handleFinalState = (sId: string, status: SearchStatus, payloadData: any) => {
+      if (!sId) return;
+      setData((prev) => {
+        if (!prev) return prev;
+        const idx = prev.items.findIndex((i) => i.searchSessionId === sId);
+        if (idx === -1) return prev;
+
+        const newItems = [...prev.items];
+        newItems[idx] = {
+          ...newItems[idx],
+          status: status,
+          failureReason: payloadData?.error || payloadData?.failureReason || newItems[idx].failureReason,
+          duration: payloadData?.durationMs ? Math.round(payloadData.durationMs / 1000) : (payloadData?.duration || newItems[idx].duration),
+          totalLeads: payloadData?.businessesFound ?? payloadData?.totalLeads ?? newItems[idx].totalLeads,
+        };
+        return { ...prev, items: newItems };
+      });
+    };
+
+    socket.on("search:history-update", (msg: any) => {
+      const data = msg?.data;
+      if (!data || !data.searchSessionId) return;
+      handleFinalState(data.searchSessionId, (data.status?.toUpperCase() || "COMPLETED") as SearchStatus, data);
     });
-    
-    socket.on("search:stopped", () => {
-      setTimeout(() => fetchHistory(1), 300);
-    });
+
+    socket.on("search:completed", (msg: any) => handleFinalState(msg?.sessionId, "COMPLETED", msg?.data));
+    socket.on("search:error", (msg: any) => handleFinalState(msg?.sessionId, "FAILED", msg?.data));
+    socket.on("search:google-blocked", (msg: any) => handleFinalState(msg?.sessionId, "FAILED", msg?.data));
+    socket.on("search:timeout", (msg: any) => handleFinalState(msg?.sessionId, "TIMEOUT", msg?.data));
+    socket.on("search:no-results", (msg: any) => handleFinalState(msg?.sessionId, "NO_RESULTS", msg?.data));
+    socket.on("search:stopped", (msg: any) => handleFinalState(msg?.sessionId, "STOPPED", msg?.data));
 
     return () => {
       socket.disconnect();
     };
-  }, [fetchHistory]);
-
-  useEffect(() => {
-    pollingRef.current = setInterval(() => {
-      fetchHistory(1);
-    }, 5000);
-    
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    };
-  }, [fetchHistory]);
+  }, []);
 
   const handleClearHistory = async () => {
     setDeleting(true);
@@ -466,236 +502,6 @@ export function SearchHistory({ sessionId: activeSessionId }: { sessionId?: stri
                 >
                   <ArrowRight className="h-3 w-3 rotate-90" strokeWidth={2} />
                   Load More
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    };
-  }, [fetchHistory]);
-
-  const handleClearHistory = async () => {
-    setDeleting(true);
-    try {
-      await leadService.clearSearchHistory();
-      setData(null);
-      setPage(1);
-    } catch {
-    } finally {
-      setDeleting(false);
-      setShowConfirmDelete(false);
-    }
-  };
-
-  const handleRowClick = (item: SearchHistoryItem) => {
-    const params = new URLSearchParams();
-    params.set("searchSessionId", item.searchSessionId);
-    if (item.keyword) params.set("keyword", item.keyword);
-    if (item.state) params.set("state", item.state);
-    if (item.city) params.set("city", item.city);
-    if (item.area) params.set("area", item.area);
-    router.push(`/leads?${params.toString()}`);
-  };
-
-  const formatDate = (dateStr: string) => {
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const formatTime = (dateStr: string) => {
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-    } catch {
-      return "";
-    }
-  };
-
-  const getLocationString = (item: SearchHistoryItem) => {
-    const parts = [item.state, item.city, item.area].filter(Boolean);
-    return parts.join(" → ") || "—";
-  };
-
-  const items = data?.items || [];
-  const pagination = data?.pagination;
-  const total = pagination?.total || 0;
-  const totalPages = pagination?.totalPages || 0;
-
-  return (
-    <Card className="border-[#E8E5DF] shadow-sm">
-      <CardHeader className="pb-3 flex flex-row items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-[#B0AEA8]" strokeWidth={1.8} />
-          <CardTitle className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#B0AEA8]">
-            Search History
-          </CardTitle>
-          {total > 0 && (
-            <span className="text-[10px] text-[#B0AEA8] font-medium ml-1">
-              ({total})
-            </span>
-          )}
-        </div>
-        {total > 0 && !showConfirmDelete && (
-          <button
-            type="button"
-            onClick={() => setShowConfirmDelete(true)}
-            className="flex items-center gap-1 text-[10px] text-[#B0AEA8] hover:text-[#DC2626] transition-colors"
-          >
-            <Trash2 className="h-3 w-3" strokeWidth={1.5} />
-            Clear
-          </button>
-        )}
-        {showConfirmDelete && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#DC2626] font-medium">Clear all?</span>
-            <button
-              type="button"
-              onClick={handleClearHistory}
-              disabled={deleting}
-              className="text-[10px] font-semibold text-[#DC2626] hover:text-[#B91C1C] disabled:opacity-50"
-            >
-              {deleting ? "Clearing..." : "Yes"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowConfirmDelete(false)}
-              className="text-[10px] font-medium text-[#B0AEA8] hover:text-[#52525B]"
-            >
-              No
-            </button>
-          </div>
-        )}
-      </CardHeader>
-      <CardContent className="p-0">
-        {loading ? (
-          <div className="px-4 pb-3 overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-[#E8E5DF]">
-                  <th className="pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] w-[52px]">Sr.</th>
-                  <th className="pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8]">Location</th>
-                  <th className="pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] text-right w-[80px]">Leads</th>
-                  <th className="pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] text-right w-[130px]">Date &amp; Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <SkeletonRow key={i} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <Search className="h-8 w-8 text-[#D4D1CB] mb-2" strokeWidth={1.5} />
-            <p className="text-[12px] text-[#B0AEA8] font-medium">
-              No Search History Available
-            </p>
-            <p className="text-[11px] text-[#C4C2BC] mt-0.5">
-              Your completed searches will appear here
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-[#E8E5DF]">
-                  <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] w-[52px]">
-                    Sr.
-                  </th>
-                  <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8]">
-                    <MapPin className="h-3 w-3 inline mr-1" strokeWidth={1.5} />
-                    Location
-                  </th>
-                  <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] text-right w-[80px]">
-                    Leads
-                  </th>
-                  <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#B0AEA8] text-right w-[130px]">
-                    Date &amp; Time
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, idx) => {
-                  const isFailed = item.status === "failed";
-                  const dateStr = item.completedAt || item.startedAt;
-                  return (
-                    <tr
-                      key={item._id}
-                      onClick={() => handleRowClick(item)}
-                      className="border-b border-[#F0EFEB] last:border-b-0 hover:bg-[#FAFAF8] transition-colors cursor-pointer"
-                    >
-                      <td className="px-4 py-3 text-[12px] text-[#8E8C86] font-medium align-top pt-3.5">
-                        {idx + 1}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="text-[13px] font-medium text-[#18181B]">
-                            {item.keyword}
-                          </span>
-                          {isFailed ? (
-                            <XCircle className="h-3 w-3 text-[#DC2626] shrink-0" strokeWidth={2} />
-                          ) : (
-                            <CheckCircle2 className="h-3 w-3 text-[#15803D] shrink-0" strokeWidth={2} />
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 text-[11px] text-[#8E8C86] mt-0.5">
-                          <MapPin className="h-2.5 w-2.5 shrink-0" strokeWidth={1.5} />
-                          <span className="truncate">{getLocationString(item)}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right align-top pt-3.5">
-                        <span className="inline-flex items-center justify-center min-w-[28px] h-[22px] rounded-[6px] bg-[#EEF2FF] text-[11px] font-semibold text-[#1D4ED8]">
-                          {item.totalLeads}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right align-top pt-3.5">
-                        <div className="text-[11px] text-[#52525B] font-medium whitespace-nowrap">
-                          {formatDate(dateStr)}
-                        </div>
-                        <div className="text-[10px] text-[#B0AEA8] whitespace-nowrap">
-                          {formatTime(dateStr)}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {page < totalPages && (
-              <div className="px-4 py-2 border-t border-[#E8E5DF]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = page + 1;
-                    setPage(next);
-                    fetchHistory(next);
-                  }}
-                  className="w-full py-2 text-[11px] font-medium text-[#1D4ED8] hover:text-[#1E40AF] transition-colors flex items-center justify-center gap-1"
-                >
-                  <ArrowRight className="h-3 w-3 rotate-90" strokeWidth={2} />
-                  Load More ({pagination!.total - items.length} remaining)
                 </button>
               </div>
             )}

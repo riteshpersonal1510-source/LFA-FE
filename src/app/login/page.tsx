@@ -38,11 +38,6 @@ export default function LoginPage() {
         saveAuthToStorage(user, accessToken);
         setError(null);
 
-        localStorage.setItem("authToken", accessToken);
-
-        const maxAge = expiresIn ? Math.floor(expiresIn / 1000) : 28800;
-        document.cookie = `auth_token=${accessToken}; path=/; max-age=${maxAge}; SameSite=Lax; Secure=${window.location.protocol === 'https:'}`;
-
         router.push("/leads");
         router.refresh();
       }
